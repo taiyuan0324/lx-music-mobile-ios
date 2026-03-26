@@ -1,0 +1,52 @@
+name: iOS Unsigned Build (ios-adaptation)
+
+on:
+  push:
+    # 🎯 核心雷达：精准监听 ios-adaptation 分支的任何风吹草动
+    branches: [ ios-adaptation ]
+  workflow_dispatch: # 🎯 允许您在网页端手动点击按钮触发打包
+
+jobs:
+  build:
+    runs-on: macos-latest # 征用 GitHub 的免费 Mac 云主机
+    
+    steps:
+      - name: 1. 检出阵地代码
+        uses: actions/checkout@v4
+
+      - name: 2. 部署 Node.js 环境
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: 3. 安装前端火力依赖
+        run: npm install
+
+      - name: 4. 安装 iOS 原生装甲 (CocoaPods)
+        run: |
+          cd ios
+          pod install
+
+      - name: 5. 锻造未签名 IPA (核心火力输出)
+        run: |
+          # 绕过苹果签名限制，强行构建
+          xcodebuild -workspace ios/LxMusicMobile.xcworkspace \
+            -scheme "LxMusicMobile" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            clean build
+            
+          # 将编译出的 .app 封装成 .ipa 格式
+          mkdir -p Payload
+          cp -r build/Build/Products/Release-iphoneos/*.app Payload/
+          zip -r LxMusic-Unsigned.ipa Payload
+
+      - name: 6. 将成品送入仓库 (Artifacts)
+        uses: actions/upload-artifact@v4
+        with:
+          name: LxMusic-IPA-ios-adaptation # 制品名称带上分支名，防混淆
+          path: LxMusic-Unsigned.ipa

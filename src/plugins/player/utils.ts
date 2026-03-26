@@ -4,8 +4,7 @@ import BackgroundTimer from 'react-native-background-timer'
 import { playMusic as handlePlayMusic } from './playList'
 import { existsFile, moveFile, privateStorageDirectoryPath, temporaryDirectoryPath } from '@/utils/fs'
 import { toast } from '@/utils/tools'
-// import { PlayerMusicInfo } from '@/store/modules/player/playInfo'
-
+import playerStoreState from '@/store/player/state'
 
 export { useBufferProgress } from './hook'
 export { getDuration, getPosition } from './time'
@@ -18,101 +17,8 @@ const nativeTrackPlayer = NativeModules.TrackPlayerModule as {
   getCacheSize?: () => Promise<number>
   clearCache?: () => Promise<void>
 }
-export const isEmpty = (trackId = global.lx.playerTrackId) => {
-  // console.log(trackId)
-  return !trackId || emptyIdRxp.test(trackId)
-}
+export const isEmpty = (trackId = global.lx.playerTrackId) => !trackId || emptyIdRxp.test(trackId)
 export const isTempId = (trackId = global.lx.playerTrackId) => !trackId || tempIdRxp.test(trackId)
-
-// export const replacePlayTrack = async(newTrack, oldTrack) => {
-//   console.log('replaceTrack')
-//   await TrackPlayer.add(newTrack)
-//   await TrackPlayer.skip(newTrack.id)
-//   await TrackPlayer.remove(oldTrack.id)
-// }
-
-// let timeout
-// let isFirstPlay = true
-// const updateInfo = async track => {
-//   if (isFirstPlay) {
-//     // timeout = setTimeout(() => {
-//     await delayUpdateMusicInfo(track)
-//     isFirstPlay = false
-//     // }, 500)
-//   }
-// }
-
-
-// 解决快速切歌导致的通知栏歌曲信息与当前播放歌曲对不上的问题
-// const debouncePlayMusicTools = {
-//   prevPlayMusicPromise: Promise.resolve(),
-//   trackInfo: {},
-//   isDelayUpdate: false,
-//   isDebounced: false,
-//   delay: 1000,
-//   delayTimer: null,
-//   debounce(fn, delay = 100) {
-//     let timer = null
-//     let _tracks = null
-//     let _time = null
-//     return (tracks, time) => {
-//       if (!this.isDebounced && _tracks != null) this.isDebounced = true
-//       _tracks = tracks
-//       _time = time
-//       if (timer) {
-//         BackgroundTimer.clearTimeout(timer)
-//         timer = null
-//       }
-//       if (this.isDelayUpdate) {
-//         if (this.updateDelayTimer) {
-//           BackgroundTimer.clearTimeout(this.updateDelayTimer)
-//           this.updateDelayTimer = null
-//         }
-//         timer = BackgroundTimer.setTimeout(() => {
-//           timer = null
-//           let tracks = _tracks
-//           let time = _time
-//           _tracks = null
-//           _time = null
-//           this.isDelayUpdate = false
-//           fn(tracks, time)
-//         }, delay)
-//       } else {
-//         this.isDelayUpdate = true
-//         fn(tracks, time)
-//         this.updateDelayTimer = BackgroundTimer.setTimeout(() => {
-//           this.updateDelayTimer = null
-//           this.isDelayUpdate = false
-//         }, this.delay)
-//       }
-//     }
-//   },
-//   delayUpdateMusicInfo() {
-//     if (this.delayTimer) BackgroundTimer.clearTimeout(this.delayTimer)
-//     this.delayTimer = BackgroundTimer.setTimeout(() => {
-//       this.delayTimer = null
-//       if (this.trackInfo.tracks && this.trackInfo.tracks.length) delayUpdateMusicInfo(this.trackInfo.tracks[0])
-//     }, this.delay)
-//   },
-//   init() {
-//     return this.debounce((tracks, time) => {
-//       tracks = [...tracks]
-//       this.trackInfo.tracks = tracks
-//       this.trackInfo.time = time
-//       return this.prevPlayMusicPromise.then(() => {
-//         // console.log('run')
-//         if (this.trackInfo.tracks === tracks) {
-//           this.prevPlayMusicPromise = handlePlayMusic(tracks, time).then(() => {
-//             if (this.isDebounced) {
-//               this.delayUpdateMusicInfo()
-//               this.isDebounced = false
-//             }
-//           })
-//         }
-//       })
-//     }, 200)
-//   },
-// }
 
 const playMusic = ((fn: (musicInfo: LX.Player.PlayMusic, url: string, time: number) => void, delay = 800) => {
   let delayTimer: number | null = null
@@ -163,14 +69,38 @@ export const setResource = (musicInfo: LX.Player.PlayMusic, url: string, duratio
 }
 
 export const setPlay = async() => TrackPlayer.play()
-export const setStop = async() => {
-  await TrackPlayer.stop()
-}
+export const setStop = async() => { await TrackPlayer.stop() }
 export const setLoop = async(loop: boolean) => TrackPlayer.setRepeatMode(loop ? RepeatMode.Off : RepeatMode.Track)
-
 export const setPause = async() => TrackPlayer.pause()
-// export const skipToNext = () => TrackPlayer.skipToNext()
-export const setCurrentTime = async(time: number) => TrackPlayer.seekTo(time)
+
+// 💣 进度跳转核心增强
+let isSeeking = false
+export const setCurrentTime = async(time: number) => {
+  if (isSeeking) return
+  isSeeking = true
+  try {
+    // 1. 让底层原生播放器跳转
+    await TrackPlayer.seekTo(time)
+    
+    // 2. 给予 iOS 引擎 200ms 平稳期
+    await new Promise(resolve => setTimeout(resolve, 200))
+    
+    // 3. 强行更新 Store 状态，让 UI 进度条闭嘴不横跳
+    if (playerStoreState.progress) {
+      playerStoreState.progress.nowPlayTime = time
+    }
+
+    // 4. 发射最高优先级广播，直接“踹醒”歌词引擎重置时间
+    if (global.app_event) {
+      global.app_event.emit('setProgress', time)
+    }
+  } catch (err) {
+    console.warn('Seek Error:', err)
+  } finally {
+    setTimeout(() => { isSeeking = false }, 300)
+  }
+}
+
 export const setVolume = async(num: number) => TrackPlayer.setVolume(num)
 export const setPlaybackRate = async(num: number) => TrackPlayer.setRate(num)
 export const resetPlay = async() => Promise.all([setPause(), setCurrentTime(0)])
@@ -213,110 +143,25 @@ export const onStateChange = async(listener: (state: PlayStatus) => void) => {
   const sub = TrackPlayer.addEventListener(Event.PlaybackState, state => {
     let _state: PlayStatus
     switch (state) {
-      case State.Ready:
-        _state = 'Ready'
-        break
-      case State.Playing:
-        _state = 'Playing'
-        break
-      case State.Paused:
-        _state = 'Paused'
-        break
-      case State.Stopped:
-        _state = 'Stopped'
-        break
-      case State.Buffering:
-        _state = 'Buffering'
-        break
-      case State.Connecting:
-        _state = 'Connecting'
-        break
-      case State.None:
-      default:
-        _state = 'None'
-        break
+      case State.Ready: _state = 'Ready'; break
+      case State.Playing: _state = 'Playing'; break
+      case State.Paused: _state = 'Paused'; break
+      case State.Stopped: _state = 'Stopped'; break
+      case State.Buffering: _state = 'Buffering'; break
+      case State.Connecting: _state = 'Connecting'; break
+      default: _state = 'None'; break
     }
     listener(_state)
   })
-
-  return () => {
-    sub.remove()
-  }
+  return () => { sub.remove() }
 }
 
-/**
- * Subscription player state chuange event
- * @param options state change event
- * @returns remove event function
- */
-// export const playState = callback => TrackPlayer.addEventListener('playback-state', callback)
-
 export const updateOptions = async(options = {
-  // Whether the player should stop running when the app is closed on Android
-  // stopWithApp: true,
-
-  // An array of media controls capabilities
-  // Can contain CAPABILITY_PLAY, CAPABILITY_PAUSE, CAPABILITY_STOP, CAPABILITY_SEEK_TO,
-  // CAPABILITY_SKIP_TO_NEXT, CAPABILITY_SKIP_TO_PREVIOUS, CAPABILITY_SET_RATING
-  capabilities: [
-    Capability.Play,
-    Capability.Pause,
-    Capability.Stop,
-    Capability.SeekTo,
-    Capability.SkipToNext,
-    Capability.SkipToPrevious,
-  ],
-
-  notificationCapabilities: [
-    Capability.Play,
-    Capability.Pause,
-    Capability.Stop,
-    Capability.SkipToNext,
-    Capability.SkipToPrevious,
-  ],
-
-  // // An array of capabilities that will show up when the notification is in the compact form on Android
-  compactCapabilities: [
-    Capability.Play,
-    Capability.Pause,
-    Capability.Stop,
-    Capability.SkipToNext,
-  ],
-
-  // Icons for the notification on Android (if you don't like the default ones)
-  // playIcon: require('./play-icon.png'),
-  // pauseIcon: require('./pause-icon.png'),
-  // stopIcon: require('./stop-icon.png'),
-  // previousIcon: require('./previous-icon.png'),
-  // nextIcon: require('./next-icon.png'),
-  // icon: notificationIcon, // The notification icon
+  capabilities: [Capability.Play, Capability.Pause, Capability.Stop, Capability.SeekTo, Capability.SkipToNext, Capability.SkipToPrevious],
+  notificationCapabilities: [Capability.Play, Capability.Pause, Capability.Stop, Capability.SkipToNext, Capability.SkipToPrevious],
+  compactCapabilities: [Capability.Play, Capability.Pause, Capability.Stop, Capability.SkipToNext],
 }) => {
   return TrackPlayer.updateOptions(options)
 }
-
-// export const setMaxCache = async size => {
-//   // const currentTrack = await TrackPlayer.getCurrentTrack()
-//   // if (!currentTrack) return
-//   // console.log(currentTrack)
-//   // const currentTime = await TrackPlayer.getPosition()
-//   // const state = await TrackPlayer.getState()
-//   // await stop()
-//   // await TrackPlayer.destroy()
-//   // await TrackPlayer.setupPlayer({ maxCacheSize: size * 1024, maxBuffer: 1000, waitForBuffer: true })
-//   // await updateOptions()
-//   // await TrackPlayer.seekTo(currentTime)
-//   // switch (state) {
-//   //   case TrackPlayer.STATE_PLAYING:
-//   //   case TrackPlayer.STATE_BUFFERING:
-//   //     await TrackPlayer.play()
-//   //     break
-//   //   default:
-//   //     break
-//   // }
-// }
-
-// export {
-//   useProgress,
-// }
 
 export { updateMetaData, initTrackInfo } from './playList'

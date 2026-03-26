@@ -47,11 +47,18 @@ export default async(setting: LX.AppSetting) => {
     }
   })
 
-
+  // 🎯 核心事件监听
   global.app_event.on('play', play)
   global.app_event.on('pause', pause)
   global.app_event.on('stop', stop)
   global.app_event.on('error', pause)
   global.app_event.on('musicToggled', stop)
   global.app_event.on('lyricUpdated', setLyric)
+
+  // 💣 绝杀补丁：监听进度跳转事件
+  // 当收到 setProgress 信号时，强行让歌词引擎重新按照新时间“play”一次
+  global.app_event.on('setProgress', (time: number) => {
+    // 这里的 play(time) 是核心，它会重置歌词内部的定时器
+    play(time * 1000) 
+  })
 }

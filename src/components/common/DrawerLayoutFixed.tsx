@@ -1,6 +1,15 @@
 import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react'
-import { DrawerLayoutAndroid, type DrawerLayoutAndroidProps, View, type LayoutChangeEvent, Platform, TouchableWithoutFeedback, Dimensions } from 'react-native'
-// import { getWindowSise } from '@/utils/tools'
+import { 
+  DrawerLayoutAndroid, 
+  type DrawerLayoutAndroidProps, 
+  View, 
+  type LayoutChangeEvent, 
+  Platform, 
+  TouchableWithoutFeedback, 
+  Dimensions, 
+  Animated, 
+  Easing 
+} from 'react-native'
 import { usePageVisible } from '@/store/common/hook'
 import { type COMPONENT_IDS } from '@/config/constant'
 
@@ -8,6 +17,7 @@ interface Props extends DrawerLayoutAndroidProps {
   visibleNavNames: COMPONENT_IDS[]
   widthPercentage: number
   widthPercentageMax?: number
+  edgeWidth?: number 
 }
 
 export interface DrawerLayoutFixedType {
@@ -16,32 +26,36 @@ export interface DrawerLayoutFixedType {
   fixWidth: () => void
 }
 
-const DrawerLayoutFixed = forwardRef<DrawerLayoutFixedType, Props>(({ visibleNavNames, widthPercentage, widthPercentageMax, children, ...props }, ref) => {
+const DrawerLayoutFixed = forwardRef<DrawerLayoutFixedType, Props>(({ 
+  visibleNavNames, 
+  widthPercentage, 
+  widthPercentageMax, 
+  children, 
+  edgeWidth = 20, // 默认 20
+  ...props 
+}, ref) => {
   const drawerLayoutRef = useRef<DrawerLayoutAndroid>(null)
-  const [w, setW] = useState<number | `${number}%`>('100%')
+  const [w, setW] = useState<number | `${number}%`>( '100%')
   const [drawerWidth, setDrawerWidth] = useState(() => {
     const width = Dimensions.get('window').width
     const wp = Math.floor(width * widthPercentage)
     return widthPercentageMax ? Math.min(wp, widthPercentageMax) : wp
   })
+  
   const [iosDrawerVisible, setIosDrawerVisible] = useState(false)
-  const changedRef = useRef({ width: 0, changed: false })
+  const animValue = useRef(new Animated.Value(0)).current 
+  
   const isAndroid = Platform.OS == 'android'
   const isLeft = props.drawerPosition != 'right'
 
-  const fixDrawerWidth = useCallback(() => {
-    if (!isAndroid) return
-    if (!changedRef.current.width) return
-    changedRef.current.changed = true
-    // console.log('usePageVisible', visible, changedRef.current.width)
-    setW(changedRef.current.width - 1)
-  }, [isAndroid])
-
-  // 修复 DrawerLayoutAndroid 在导航到其他屏幕再返回后无法打开的问题
-  usePageVisible(visibleNavNames, useCallback((visible) => {
-    if (!visible || !changedRef.current.width) return
-    fixDrawerWidth()
-  }, [fixDrawerWidth]))
+  const animateDrawer = useCallback((toValue: number, callback?: () => void) => {
+    Animated.timing(animValue, {
+      toValue,
+      duration: 250,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start(callback)
+  }, [animValue])
 
   useImperativeHandle(ref, () => ({
     openDrawer() {
@@ -50,100 +64,70 @@ const DrawerLayoutFixed = forwardRef<DrawerLayoutFixedType, Props>(({ visibleNav
         return
       }
       setIosDrawerVisible(true)
+      animateDrawer(1)
     },
     closeDrawer() {
       if (isAndroid) {
         drawerLayoutRef.current?.closeDrawer()
         return
       }
-      setIosDrawerVisible(false)
+      animateDrawer(0, () => setIosDrawerVisible(false))
     },
-    fixWidth() {
-      fixDrawerWidth()
-    },
-  }), [fixDrawerWidth, isAndroid])
-
-
-  const handleLayout = useCallback((e: LayoutChangeEvent) => {
-    const width = e.nativeEvent.layout.width
-    if (changedRef.current.width != width) {
-      changedRef.current.width = width
-      const wp = Math.floor(width * widthPercentage)
-      setDrawerWidth(widthPercentageMax ? Math.min(wp, widthPercentageMax) : wp)
-    }
-    if (!isAndroid) return
-    if (changedRef.current.changed) {
-      setW('100%')
-      changedRef.current.changed = false
-      return
-    }
-    changedRef.current.changed = true
-    setW(width - 1)
-  }, [widthPercentage, widthPercentageMax, isAndroid])
+    fixWidth() {},
+  }), [isAndroid, animateDrawer])
 
   if (!isAndroid) {
     return (
-      <View style={{ width: '100%', flex: 1 }} onLayout={handleLayout}>
+      <View style={{ flex: 1, width: '100%' }}>
         {children}
-        <View
-          pointerEvents={iosDrawerVisible ? 'auto' : 'none'}
-          style={{
-            position: 'absolute',
-            top: 0,
-            right: 0,
-            bottom: 0,
-            left: 0,
-          }}
-        >
-          <TouchableWithoutFeedback onPress={() => { setIosDrawerVisible(false) }}>
-            <View style={{ flex: 1, backgroundColor: iosDrawerVisible ? 'rgba(0, 0, 0, 0.35)' : 'transparent' }}>
-              <TouchableWithoutFeedback>
-                <View
-                  style={{
-                    width: drawerWidth,
-                    height: '100%',
-                    backgroundColor: props.drawerBackgroundColor ?? 'white',
-                    marginLeft: isLeft ? 0 : undefined,
-                    marginRight: isLeft ? undefined : 0,
-                    alignSelf: isLeft ? 'flex-start' : 'flex-end',
-                    transform: [{ translateX: iosDrawerVisible ? 0 : (isLeft ? -drawerWidth : drawerWidth) }],
-                  }}
-                >
-                  <View style={{ flex: 1 }}>
-                    {props.renderNavigationView?.()}
-                  </View>
-                </View>
-              </TouchableWithoutFeedback>
-            </View>
-          </TouchableWithoutFeedback>
-        </View>
+        {iosDrawerVisible && (
+          <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999 }}>
+            <TouchableWithoutFeedback onPress={() => animateDrawer(0, () => setIosDrawerVisible(false))}>
+              <Animated.View 
+                style={{ 
+                  position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                  backgroundColor: 'black',
+                  opacity: animValue.interpolate({ inputRange: [0, 1], outputRange: [0, 0.5] })
+                }} 
+              />
+            </TouchableWithoutFeedback>
+            <Animated.View
+              style={{
+                position: 'absolute',
+                top: 0,
+                width: drawerWidth,
+                height: '100%',
+                backgroundColor: props.drawerBackgroundColor || '#ffffff',
+                left: isLeft ? 0 : undefined,
+                right: isLeft ? undefined : 0,
+                transform: [{
+                  translateX: animValue.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [isLeft ? -drawerWidth : drawerWidth, 0]
+                  })
+                }],
+              }}
+            >
+              {props.renderNavigationView?.()}
+            </Animated.View>
+          </View>
+        )}
       </View>
     )
   }
 
   return (
-    <View
-      onLayout={handleLayout}
-      style={{ width: w, flex: 1 }}
-    >
-      <DrawerLayoutAndroid
-        ref={drawerLayoutRef}
-        keyboardDismissMode="on-drag"
-        drawerWidth={drawerWidth}
+    <View style={{ width: w, flex: 1 }}>
+      <DrawerLayoutAndroid 
+        ref={drawerLayoutRef} 
+        drawerWidth={drawerWidth} 
+        drawerLockMode={edgeWidth === 0 ? 'locked-closed' : props.drawerLockMode} 
         {...props}
       >
-        <View style={{ marginRight: w == '100%' ? 0 : -1, flex: 1 }}>
-          {children}
-        </View>
+        <View style={{ flex: 1 }}>{children}</View>
       </DrawerLayoutAndroid>
     </View>
   )
 })
-
-// const styles = createStyle({
-//   container: {
-//     flex: 1,
-//   },
-// })
 
 export default DrawerLayoutFixed

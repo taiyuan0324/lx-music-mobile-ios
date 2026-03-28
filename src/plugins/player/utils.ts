@@ -1,3 +1,4 @@
+import { play as lyricPlay } from '@/plugins/lyric'
 import TrackPlayer, { Capability, Event, RepeatMode, State } from 'react-native-track-player'
 import { NativeModules, Platform } from 'react-native'
 import BackgroundTimer from 'react-native-background-timer'
@@ -81,7 +82,7 @@ export const setCurrentTime = async(time: number) => {
   try {
     // 1. 让底层原生播放器跳转
     await TrackPlayer.seekTo(time)
-    
+    lyricPlay(time)
     // 2. 给予 iOS 引擎 200ms 平稳期
     await new Promise(resolve => setTimeout(resolve, 200))
     

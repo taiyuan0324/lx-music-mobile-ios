@@ -8,21 +8,15 @@
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
 {
+  // 👇 显式声明播放类别，确保后台不掉线
   AVAudioSession *audioSession = [AVAudioSession sharedInstance];
-  if (@available(iOS 10.0, *)) {
-    [audioSession setCategory:AVAudioSessionCategoryPlayback
-                   withOptions:(AVAudioSessionCategoryOptionAllowBluetoothA2DP | AVAudioSessionCategoryOptionAllowAirPlay)
-                         error:nil];
-  } else {
-    [audioSession setCategory:AVAudioSessionCategoryPlayback error:nil];
-  }
+  [audioSession setCategory:AVAudioSessionCategoryPlayback error:nil];
   [audioSession setActive:YES error:nil];
   [application beginReceivingRemoteControlEvents];
 
   RCTBridge *bridge = [[RCTBridge alloc] initWithDelegate:self launchOptions:launchOptions];
   [ReactNativeNavigation bootstrapWithBridge:bridge];
-  // You can add your custom initial props in the dictionary below.
-  // They will be passed down to the ViewController used by React Native.
+  
   self.initialProps = @{};
 
   return YES;
@@ -36,6 +30,7 @@
 {
   return [self getBundleURL];
 }
+
 - (NSURL *)getBundleURL
 {
 #if DEBUG

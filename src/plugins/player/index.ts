@@ -1,20 +1,5 @@
-import TrackPlayer, { IOSCategory, IOSCategoryOptions } from 'react-native-track-player'
+import TrackPlayer, { IOSCategory, IOSCategoryOptions, Event } from 'react-native-track-player'
 import { updateOptions, setVolume, setPlaybackRate, migratePlayerCache } from './utils'
-
-// const listenEvent = () => {
-//   TrackPlayer.addEventListener('playback-error', err => {
-//     console.log('playback-error', err)
-//   })
-//   TrackPlayer.addEventListener('playback-state', info => {
-//     console.log('playback-state', info)
-//   })
-//   TrackPlayer.addEventListener('playback-track-changed', info => {
-//     console.log('playback-track-changed', info)
-//   })
-//   TrackPlayer.addEventListener('playback-queue-ended', info => {
-//     console.log('playback-queue-ended', info)
-//   })
-// }
 
 const initial = async({ volume, playRate, cacheSize, isHandleAudioFocus, isEnableAudioOffload }: {
   volume: number
@@ -31,7 +16,7 @@ const initial = async({ volume, playRate, cacheSize, isHandleAudioFocus, isEnabl
       maxCacheSize: cacheSize * 1024,
       maxBuffer: 1000,
       waitForBuffer: true,
-      handleAudioFocus: isHandleAudioFocus,
+      handleAudioFocus: true, // 强制接管内部焦点
       audioOffload: isEnableAudioOffload,
       iosCategory: IOSCategory.Playback,
       iosCategoryOptions: [
@@ -40,6 +25,24 @@ const initial = async({ volume, playRate, cacheSize, isHandleAudioFocus, isEnabl
       ],
       autoUpdateMetadata: true,
     })
+
+    // 终极无延迟雷达：破解 iOS 电话/微信 后台假死机制
+    TrackPlayer.addEventListener(Event.RemoteDuck, async (event) => {
+      if (event.permanent) {
+        // 永久打断（看视频、刷抖音），乖乖闭嘴
+        await TrackPlayer.pause()
+        return
+      }
+
+      if (event.paused) {
+        // 暂时打断（来电话、发微信语音），暂停开火
+        await TrackPlayer.pause()
+      } else {
+        // 打断解除，不等任何延迟，第一毫秒瞬间开火夺回阵地！
+        await TrackPlayer.play().catch(e => console.log('强行复活失败:', e))
+      }
+    })
+
     global.lx.playerStatus.isInitialized = true
     await updateOptions()
     await setVolume(volume)
@@ -47,12 +50,9 @@ const initial = async({ volume, playRate, cacheSize, isHandleAudioFocus, isEnabl
   } finally {
     global.lx.playerStatus.isIniting = false
   }
-  // listenEvent()
 }
 
-
 const isInitialized = () => global.lx.playerStatus.isInitialized
-
 
 export {
   initial,

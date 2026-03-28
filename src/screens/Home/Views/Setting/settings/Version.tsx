@@ -11,7 +11,7 @@ import { useVersionDownloadProgressUpdated, useVersionInfo } from '@/store/versi
 import Text from '@/components/common/Text'
 import { showModal } from '@/core/version'
 
-const currentVer = process.versions.app
+const currentVer = '9.9.9'
 export default memo(() => {
   const t = useI18n()
   const versionInfo = useVersionInfo()
